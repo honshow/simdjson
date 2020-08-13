@@ -26,6 +26,37 @@ const int REPETITIONS = 10;
 
 #if SIMDJSON_IMPLEMENTATION_HASWELL
 
+#include "twitter/ondemand_tweet_reader.h"
+
+SIMDJSON_TARGET_HASWELL
+
+static void ondemand_tweets(State &state) {
+  // Load twitter.json to a buffer
+  padded_string json;
+  if (auto error = padded_string::load(TWITTER_JSON).get(json)) { cerr << error << endl; return; }
+
+  // Allocate and warm the vector
+  twitter::ondemand_tweet_reader reader;
+  if (auto error = reader.read_tweets(json)) { throw error; }
+
+  // Read tweets
+  size_t bytes = 0;
+  size_t tweets = 0;
+  for (SIMDJSON_UNUSED auto _ : state) {
+    if (auto error = reader.read_tweets(json)) { throw error; }
+    bytes += json.size();
+    tweets += reader.tweets.size();
+  }
+  // Gigabyte: https://en.wikipedia.org/wiki/Gigabyte
+  state.counters["Gigabytes"] = benchmark::Counter(
+	        double(bytes), benchmark::Counter::kIsRate,
+	        benchmark::Counter::OneK::kIs1000); // For GiB : kIs1024
+  state.counters["docs"] = Counter(double(state.iterations()), benchmark::Counter::kIsRate);
+  state.counters["tweets"] = Counter(double(tweets), benchmark::Counter::kIsRate);
+}
+
+SIMDJSON_UNTARGET_REGION
+
 #include "twitter/sax_tweet_reader.h"
 
 static void sax_tweets(State &state) {
